@@ -119,7 +119,11 @@ def detect_keypoints(image_file: os.path):
     Detect keypoints using cv2.SIFT_create() and sift.detectAndCompute
     """
     
+    image = cv2.imread(str(image_file), cv2.IMREAD_GRAYSCALE)
 
+    sift = cv2.SIFT_create()
+
+    keypoints, descriptors = sift.detectAndCompute(image, None)
 
     """ END YOUR CODE HERE. """
 
@@ -168,7 +172,13 @@ def create_feature_matches(image_file1: os.path, image_file2: os.path, lowe_rati
     2. Filter the feature matches using the Lowe ratio test.
     """
     
+    bf = cv2.BFMatcher()
 
+    matches = bf.knnMatch(descriptors1, descriptors2, k=2)
+
+    for m, n in matches:
+        if m.distance < lowe_ratio * n.distance:
+            good_matches.append([m])
 
     """ END YOUR CODE HERE. """
     if len(good_matches) < min_matches:
@@ -242,8 +252,15 @@ def create_ransac_matches(image_file1: os.path, image_file2: os.path,
     Perform goemetric verification by finding the essential matrix between keypoints in the first image and keypoints in
     the second image using cv2.findEssentialMatrix(..., method=cv2.RANSAC, threshold=ransac_threshold, ...)
     """
-    
 
+    essential_mtx, mask = cv2.findEssentialMat(
+        points1, points2, 
+        cameraMatrix=camera_intrinsics, 
+        method=cv2.RANSAC, 
+        prob=0.999, 
+        threshold=ransac_threshold
+    )
+    is_inlier = mask.ravel().astype(bool)  
 
     """ END YOUR CODE HERE """
 
@@ -268,8 +285,10 @@ def create_ransac_matches(image_file1: os.path, image_file2: os.path,
     cv2.imwrite(image_save_file, save_image)
     return match_id
 
+import itertools
 
 def create_scene_graph(image_files: list, min_num_inliers: int = 40):
+    print(f"RANSAC_MATCH_DIR: {RANSAC_MATCH_DIR}")
     graph = nx.Graph()
     graph.add_nodes_from(list(range(len(image_files))))
     image_ids = [os.path.basename(file)[:-4] for file in image_files]
@@ -279,7 +298,19 @@ def create_scene_graph(image_files: list, min_num_inliers: int = 40):
     <min_num_inliers> 
     """
     
-
+    for (i1, file1), (i2, file2) in itertools.combinations(enumerate(image_files), 2):
+        match_id = create_ransac_matches(file1, file2, min_feature_matches=min_num_inliers)
+        if match_id:
+            npy_file_path = os.path.join(RANSAC_MATCH_DIR, match_id + '.npy')
+            print(f"Attempting to load: {npy_file_path}")
+            try:
+                matches = np.load(npy_file_path)
+                if len(matches) >= min_num_inliers:
+                    graph.add_edge(i1, i2)
+            except FileNotFoundError:
+                print(f"File not found: {npy_file_path}")
+            except Exception as e:
+                print(f"Error loading file: {npy_file_path} - {e}")
     
     """ END YOUR CODE HERE """
 

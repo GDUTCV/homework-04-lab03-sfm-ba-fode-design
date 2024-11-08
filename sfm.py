@@ -26,8 +26,21 @@ def get_init_image_ids(scene_graph: dict) -> (str, str):
     """
     max_pair = [None, None]  # dummy value
     """ YOUR CODE HERE """
-    
+    max_inliers = -1
 
+    for image_id1 in scene_graph.keys():
+        neighbors1 = set(scene_graph[image_id1])
+        
+        for image_id2 in scene_graph.keys():
+            if image_id1 == image_id2:
+                continue  
+            
+            neighbors2 = set(scene_graph[image_id2])
+            common_neighbors = neighbors1 & neighbors2  
+            
+            if len(common_neighbors) > max_inliers:
+                max_inliers = len(common_neighbors)
+                max_pair = [image_id1, image_id2]
 
     """ END YOUR CODE HERE """
     image_id1, image_id2 = sorted(max_pair)
@@ -78,7 +91,11 @@ def get_init_extrinsics(image_id1: str, image_id2: str, intrinsics: np.ndarray) 
 
     extrinsics2 = np.zeros(shape=[3, 4], dtype=float)
     """ YOUR CODE HERE """
-    
+
+    _, R, t, _ = cv2.recoverPose(essential_mtx, points2d_1, points2d_2, intrinsics)
+
+    extrinsics2[:3, :3] = R
+    extrinsics2[:3, 3] = t.ravel()
 
 
     """ END YOUR CODE HERE """
@@ -154,7 +171,20 @@ def get_reprojection_residuals(points2d: np.ndarray, points3d: np.ndarray, intri
     """
     residuals = np.zeros(points2d.shape[0])
     """ YOUR CODE HERE """
-   
+
+    tvec = tvec.reshape(3, 1)
+
+    for i in range(points3d.shape[0]):
+        point3d_cam = rotation_mtx @ points3d[i, :].reshape(3, 1) + tvec
+        
+        point3d_homog = np.vstack((point3d_cam, 1))
+        
+        point2d_proj = intrinsics @ point3d_homog
+        point2d_proj = point2d_proj / point2d_proj[2]  
+        point2d_proj = point2d_proj[:2].flatten()  
+
+        residual = np.linalg.norm(point2d_proj - points2d[i, :])
+        residuals[i] = residual
 
 
     """ END YOUR CODE HERE """
@@ -202,8 +232,14 @@ def solve_pnp(image_id: str, point2d_idxs: np.ndarray, all_points3d: np.ndarray,
         2. convert the returned rotation vector to rotation matrix using cv2.Rodrigues
         3. compute the reprojection residuals
         """
-       
 
+        _, rvec, tvec = cv2.solvePnP(selected_pts3d, selected_pts2d, intrinsics, None, flags=cv2.SOLVEPNP_ITERATIVE)
+
+        rotation_mtx, _ = cv2.Rodrigues(rvec)
+
+        projected_points, _ = cv2.projectPoints(points3d, rvec, tvec, intrinsics, None)
+        projected_points = projected_points.squeeze()
+        residuals = np.linalg.norm(points2d - projected_points, axis=1)
 
         """ END YOUR CODE HERE """
 
@@ -255,7 +291,21 @@ def add_points3d(image_id1: str, image_id2: str, all_extrinsic: dict, intrinsics
     new_points3d = triangulate(..., kp_idxs1=matches[:, 0], kp_idxs2=matches[:, 1], ...)
     """
     
+    points2d_1 = get_selected_points2d(image_id=image_id1, select_idxs=matches[:, 0])
+    points2d_2 = get_selected_points2d(image_id=image_id2, select_idxs=matches[:, 1])
 
+    extrinsic1 = all_extrinsic[image_id1]
+    extrinsic2 = all_extrinsic[image_id2]
+
+    assert extrinsic1.shape == (3, 4), "extrinsic1 should be a 3x4 matrix"
+    assert extrinsic2.shape == (3, 4), "extrinsic2 should be a 3x4 matrix"
+
+    proj_matrix1 = intrinsics @ extrinsic1
+    proj_matrix2 = intrinsics @ extrinsic2
+
+    points4d = cv2.triangulatePoints(proj_matrix1, proj_matrix2, points2d_1.T, points2d_2.T)
+    new_points3d = points4d[:3, :] / points4d[3, :]  
+    new_points3d = new_points3d.T    
 
     """ END YOUR CODE HERE """
 
@@ -286,7 +336,21 @@ def get_next_pair(scene_graph: dict, registered_ids: list):
     max_new_id, max_registered_id, max_num_inliers = None, None, 0
     """ YOUR CODE HERE """
     
+    for new_id, neighbors in scene_graph.items():
+        if new_id in registered_ids:
+            continue  
 
+        for registered_id in neighbors:
+            if registered_id not in registered_ids:
+                continue  
+
+            matches = load_matches(image_id1=new_id, image_id2=registered_id)
+            num_inliers = matches.shape[0]
+
+            if num_inliers > max_num_inliers:
+                max_new_id = new_id
+                max_registered_id = registered_id
+                max_num_inliers = num_inliers
 
     
     """ END YOUR CODE HERE """

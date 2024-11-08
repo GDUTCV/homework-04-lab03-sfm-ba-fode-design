@@ -45,7 +45,18 @@ def compute_ba_residuals(parameters: np.ndarray, intrinsics: np.ndarray, num_cam
     HINT: I used np.matmul; np.sum; np.sqrt; np.square, np.concatenate etc.
     """
     
+    extrinsics_sel = extrinsics[camera_idxs]
 
+    points3d_homogeneous = np.hstack((points3d[points3d_idxs], np.ones((points3d_idxs.size, 1))))
+
+    points3d_camera = np.matmul(extrinsics_sel, points3d_homogeneous[..., None])  
+    points3d_camera = points3d_camera.squeeze()  
+
+    points3d_camera /= points3d_camera[:, 2, None]  
+
+    projected_points = np.matmul(intrinsics, points3d_camera.T).T  
+
+    residuals = np.linalg.norm(points2d - projected_points[:, :2], axis=1)  
     
     """ END YOUR CODE HERE """
     return residuals
